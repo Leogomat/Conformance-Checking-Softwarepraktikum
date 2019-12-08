@@ -1,0 +1,9 @@
+[submodule "pm4py-distr"]
+	path = pm4py-distr
+	url = https://github.com/Leogomat/pm4py-distr.git
+[submodule "pm4py-source"]
+	path = pm4py-source
+	url = https://github.com/Leogomat/pm4py-source.git
+[submodule "pm4py-pred"]
+	path = pm4py-pred
+	url = https://github.com/Leogomat/pm4py-pred.git
