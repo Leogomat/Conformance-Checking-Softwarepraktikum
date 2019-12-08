@@ -1,0 +1,10 @@
+
+
+# Constants
+NUMBER_OF_SLAVES = 2
+TRAINING_PART = 0.8
+NUMBER_OF_PARTITIONS = 64
+MODEL_PATH = "Data/Ensembles"
+LOGS_PATH = "Data/Event Logs"
+
+
