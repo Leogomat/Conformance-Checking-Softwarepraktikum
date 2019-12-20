@@ -110,7 +110,7 @@ if __name__ == "__main__":
                 data=json.dumps(test_events[args.evtlog]))
             print(r.text)
         else:
-            print("Invalid command line arguments")
+            print("Invalid command line arguments.")
 
 
 
