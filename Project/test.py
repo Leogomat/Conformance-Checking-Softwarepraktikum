@@ -1,18 +1,15 @@
 from pm4py.objects.log.exporter.parquet import factory as parquet_exporter
 from pm4py.objects.log.importer.xes import factory as xes_importer
-from pm4pydistr.master.variable_container import MasterVariableContainer
-from pm4pydistr.master.master import Master
-from pm4pydistr.slave.slave import Slave
+from pm4pydistr.configuration import PYTHON_PATH
 import pm4pydistr
 import requests
+from threading import Thread
 import json
 import time
 import shutil
 import argparse
 import os
 
-
-# First events of a trace for testing the prediction
 test_events = {
     "receipt": {'org:group': 'EMPTY',
                 'concept:instance': 'task-20635',
@@ -36,6 +33,15 @@ test_events = {
 }
 
 
+class ExecutionThread(Thread):
+    def __init__(self, command):
+        self.command = command
+        Thread.__init__(self)
+
+    def run(self):
+        os.system(self.command)
+
+
 # Clean a folder of its files
 def refresh_directory(path):
     if os.path.exists(path):
@@ -44,13 +50,14 @@ def refresh_directory(path):
 
 
 if __name__ == "__main__":
-    # Refresh the master and training folders
+    # Refresh the master, training, and slave folders
     refresh_directory("master")
     refresh_directory("testing")
+    refresh_directory("slave1")
+    refresh_directory("slave2")
 
     # Declare parser for taking command line arguments
-    parser = argparse.ArgumentParser(description="Choose functionality")
-    parser.add_argument(dest="func", type=str)
+    parser = argparse.ArgumentParser(description="Choose event log")
     parser.add_argument(dest="evtlog", type=str)
     args = parser.parse_args()
 
@@ -64,38 +71,48 @@ if __name__ == "__main__":
         shutil.move("master\\@@partitioning=" + str(i), "testing\\@@partitioning=" + str(i))
 
     # Initialize master and slaves
-    m = Master({"host": pm4pydistr.configuration.MASTER_HOST,
-                "port": pm4pydistr.configuration.MASTER_PORT,
-                "conf": "master"})
+    t1 = ExecutionThread(PYTHON_PATH + " launch.py type master conf master port 5001")
+    t1.start()
+    t2 = ExecutionThread(
+        PYTHON_PATH + " launch.py type slave conf slave1 autoport 1 masterhost 127.0.0.1 masterport 5001")
+    t2.start()
+    t3 = ExecutionThread(
+        PYTHON_PATH + " launch.py type slave conf slave2 autoport 1 masterhost 127.0.0.1 masterport 5001")
+    t3.start()
 
-    s = {}
-    for j in range(pm4pydistr.configuration.NUMBER_OF_SLAVES):
-        refresh_directory("slave" + str(j))
-        s["slave" + str(j)] = Slave({"host": pm4pydistr.configuration.THIS_HOST,
-                                               "port": pm4pydistr.configuration.PORT + j + 1,
-                                               "masterhost": pm4pydistr.configuration.MASTER_HOST,
-                                               "masterport": pm4pydistr.configuration.MASTER_PORT,
-                                               "conf": "slave" + str(j)})
+    # Wait for nodes to be initialized
+    time.sleep(20)
 
     # Assign event logs to slaves
-    requests.get(
-        "http://" + pm4pydistr.configuration.MASTER_HOST + ":" + MasterVariableContainer.port + "/doLogAssignment" +
+    r = requests.get(
+        "http://" + pm4pydistr.configuration.MASTER_HOST + ":" + str(5001) + "/doLogAssignment" +
         "?keyphrase=" + pm4pydistr.configuration.KEYPHRASE)
+    print("Log assignment done")
 
     # Wait for files to be assigned
     time.sleep(1)
 
-    if args.func == "train":
-        q = requests.get(
-            "http://" + pm4pydistr.configuration.MASTER_HOST + ":" + str(pm4pydistr.configuration.MASTER_PORT) + "/doTraining?keyphrase=" +
-            pm4pydistr.configuration.KEYPHRASE + "&process=" + args.evtlog)
-    elif args.func == "predict":
-        r = requests.post(
-            "http://" + pm4pydistr.configuration.MASTER_HOST + ":" + str(pm4pydistr.configuration.MASTER_PORT) + "/doPrediction?keyphrase=" +
-            pm4pydistr.configuration.KEYPHRASE + "&process=" + args.evtlog, data=json.dumps(test_events[args.evtlog]))
-        print(r.text)
-    else:
-        print("Invalid command line arguments")
+    while (1):
+
+        # Ask user to input desired functionality
+        i = input("\n Input functionality (train/predict): ")
+
+        if i == "train":
+            q = requests.get(
+                "http://" + pm4pydistr.configuration.MASTER_HOST + ":" + str(
+                    pm4pydistr.configuration.MASTER_PORT) + "/doTraining?keyphrase=" +
+                pm4pydistr.configuration.KEYPHRASE + "&process=" + args.evtlog)
+        elif i == "predict":
+            r = requests.post(
+                "http://" + pm4pydistr.configuration.MASTER_HOST + ":" + str(
+                    pm4pydistr.configuration.MASTER_PORT) + "/doPrediction?keyphrase=" +
+                pm4pydistr.configuration.KEYPHRASE + "&process=" + args.evtlog,
+                data=json.dumps(test_events[args.evtlog]))
+            print(r.text)
+        else:
+            print("Invalid command line arguments")
+
+
 
 
 
