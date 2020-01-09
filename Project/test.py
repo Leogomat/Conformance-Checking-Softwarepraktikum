@@ -7,7 +7,6 @@ from threading import Thread
 import json
 import time
 import shutil
-import argparse
 import os
 
 test_events = {
@@ -18,18 +17,14 @@ test_events = {
                 'time:timestamp': '2011-04-21 15:55:07.600000',
                 'lifecycle:transition': 'complete'},
 
-    "roadtraffic100traces": {'amount': 32.8,
-                             'org:resource': '820',
-                             'dismissal': 'NIL',
-                             'concept:name': 'Create Fine',
-                             'vehicleClass': 'M',
-                             'totalPaymentAmount': 0.0,
-                             'lifecycle:transition': 'complete',
-                             'time:timestamp': '2001-09-26 00:00:00',
-                             'article': 171.0,
-                             'points': 0.0,
-                             'notificationType': None,
-                             'lastSent': None}
+    "receipt_wrong": {'org:grou': 'EMPTY',
+                      'concept:instance': 'task-20635',
+                      'org:resource': 'Resource17',
+                      'concept:name': 'Confirmation of receipt',
+                      'time:timestamp': '2011-04-21 15:55:07.600000',
+                      'lifecycle:transition': 'complete'},
+
+    "receipt_empty": {}
 }
 
 
@@ -55,19 +50,17 @@ if __name__ == "__main__":
     refresh_directory("testing")
     refresh_directory("slave1")
     refresh_directory("slave2")
-
-    # Declare parser for taking command line arguments
-    parser = argparse.ArgumentParser(description="Choose event log")
-    parser.add_argument(dest="evtlog", type=str)
-    args = parser.parse_args()
+    refresh_directory("Data/Ensembles")
 
     # Import event log and partition it
-    log = xes_importer.apply("Data/Event Logs/" + args.evtlog + ".xes")
+    log = xes_importer.apply("Data/Event Logs/receipt.xes")
     parquet_exporter.apply(log, "master",
-                           parameters={"auto_partitioning": True, "num_partitions": pm4pydistr.configuration.NUMBER_OF_PARTITIONS})
+                           parameters={"auto_partitioning": True,
+                                       "num_partitions": pm4pydistr.configuration.NUMBER_OF_PARTITIONS})
 
     # Move the training log to the training folder
-    for i in range(int(pm4pydistr.configuration.NUMBER_OF_PARTITIONS * pm4pydistr.configuration.TRAINING_PART), pm4pydistr.configuration.NUMBER_OF_PARTITIONS):
+    for i in range(int(pm4pydistr.configuration.NUMBER_OF_PARTITIONS * pm4pydistr.configuration.TRAINING_PART),
+                   pm4pydistr.configuration.NUMBER_OF_PARTITIONS):
         shutil.move("master\\@@partitioning=" + str(i), "testing\\@@partitioning=" + str(i))
 
     # Initialize master and slaves
@@ -87,31 +80,109 @@ if __name__ == "__main__":
     r = requests.get(
         "http://" + pm4pydistr.configuration.MASTER_HOST + ":" + str(5001) + "/doLogAssignment" +
         "?keyphrase=" + pm4pydistr.configuration.KEYPHRASE)
-    print("Log assignment done")
+    print("Log assignment done\n")
+    print("Performing tests with 2 slaves:\n")
 
     # Wait for files to be assigned
     time.sleep(1)
 
-    while (1):
+    # Here we test the service functionalities.
 
-        # Ask user to input desired functionality
-        i = input("\n Input functionality (train/predict): ")
+    """Here we test if the service is able to perform a prediction when there is no ensemble available. This shouldn't
+    be possible, so the test is passed if the status code of the request indicates failure (405)"""
+    try:
+        print("Test 1: Perform prediction using nonexistent ensemble")
+        request = requests.get("http://" + pm4pydistr.configuration.MASTER_HOST + ":" + str(
+                          pm4pydistr.configuration.MASTER_PORT) + "/doPrediction?keyphrase=" +
+                          pm4pydistr.configuration.KEYPHRASE + "&process=receipts",
+                          data=json.dumps(test_events["receipt"]))
 
-        if i == "train":
-            q = requests.get(
-                "http://" + pm4pydistr.configuration.MASTER_HOST + ":" + str(
-                    pm4pydistr.configuration.MASTER_PORT) + "/doTraining?keyphrase=" +
-                pm4pydistr.configuration.KEYPHRASE + "&process=" + args.evtlog)
-        elif i == "predict":
-            r = requests.post(
-                "http://" + pm4pydistr.configuration.MASTER_HOST + ":" + str(
-                    pm4pydistr.configuration.MASTER_PORT) + "/doPrediction?keyphrase=" +
-                pm4pydistr.configuration.KEYPHRASE + "&process=" + args.evtlog,
-                data=json.dumps(test_events[args.evtlog]))
-            print(r.text)
-        else:
-            print("Invalid command line arguments.")
+        print("Status code: " + str(request.status_code))
+        print("Request text: " + request.text)
+        request.raise_for_status()
+        print("Test 1: Failed\n")
+    except:
+        print("Test 1: Passed\n")
 
+    """Here we test if the service is able to train an ensemble on the event log. The test is passed if the status code
+    of the request indicates success (200)"""
+    try:
+        print("Test 2: Training ensemble on event log")
+        request = requests.get("http://" + pm4pydistr.configuration.MASTER_HOST + ":" + str(
+                          pm4pydistr.configuration.MASTER_PORT) + "/doTraining?keyphrase=" +
+                          pm4pydistr.configuration.KEYPHRASE + "&process=receipt")
+
+        print("Status code: " + str(request.status_code))
+        print("Request text: " + request.text)
+        request.raise_for_status()
+        print("Test 2: Passed\n")
+    except:
+        print("Test 2: Failed\n")
+
+    """Here we test if the service is able to replace an old ensemble trained on the the event log. The test is passed
+    if the status code of the request indicates success (200)"""
+    try:
+        print("Test 3: Training ensemble on event log again (replace old ensemble)")
+        request = requests.get("http://" + pm4pydistr.configuration.MASTER_HOST + ":" + str(
+                          pm4pydistr.configuration.MASTER_PORT) + "/doTraining?keyphrase=" +
+                          pm4pydistr.configuration.KEYPHRASE + "&process=receipt")
+
+        print("Status code: " + str(request.status_code))
+        print("Request text: " + request.text)
+        request.raise_for_status()
+        print("Test 3: Passed\n")
+    except:
+        print("Test 3: Failed\n")
+
+    """Here we test if the service is able to perform a prediction using the trained ensemble. The test is passed if the
+    status code of the request indicates success (200)"""
+    try:
+        print("Test 4: Performing prediction using existing ensemble")
+        request = requests.post("http://" + pm4pydistr.configuration.MASTER_HOST + ":" + str(
+                          pm4pydistr.configuration.MASTER_PORT) + "/doPrediction?keyphrase=" +
+                          pm4pydistr.configuration.KEYPHRASE + "&process=receipt",
+                          data=json.dumps(test_events["receipt"]))
+
+        print("Status code: " + str(request.status_code))
+        print("Request text: " + request.text)
+        request.raise_for_status()
+        print("Test 4: Passed\n")
+    except:
+        print("Test 4: Failed\n")
+
+    """Here we test if the service is able to perform a prediction using the trained ensemble when a first event with a
+    wrong attribute name is provided. This should be possible, because the prediction algorithm only uses the desired
+     attributes if they are available. The test is passed if the status code of the request indicates success (200)"""
+    try:
+        print("Test 5: Providing wrong event attribute name for prediction")
+        request = requests.post("http://" + pm4pydistr.configuration.MASTER_HOST + ":" + str(
+                          pm4pydistr.configuration.MASTER_PORT) + "/doPrediction?keyphrase=" +
+                          pm4pydistr.configuration.KEYPHRASE + "&process=receipt",
+                          data=json.dumps(test_events["receipt_wrong"]))
+
+        print("Status code: " + str(request.status_code))
+        print("Request text: " + request.text)
+        request.raise_for_status()
+        print("Test 5: Passed\n")
+    except:
+        print("Test 5: Failed\n")
+
+    """Here we test if the service is able to perform a prediction using the trained ensemble when an empty first event
+    is provided. This should be possible, because the prediction algorithm does not need any of the desired attributes
+    to perform a prediction. The test is passed if the status code of the request indicates success (200)"""
+    try:
+        print("Test 6: Providing empty event for prediction")
+        request = requests.post("http://" + pm4pydistr.configuration.MASTER_HOST + ":" + str(
+            pm4pydistr.configuration.MASTER_PORT) + "/doPrediction?keyphrase=" +
+                                pm4pydistr.configuration.KEYPHRASE + "&process=receipt",
+                                data=json.dumps(test_events["receipt_empty"]))
+
+        print("Status code: " + str(request.status_code))
+        print("Request text: " + request.text)
+        request.raise_for_status()
+        print("Test 6: Passed\n")
+    except:
+        print("Test 6: Failed\n")
 
 
 
